@@ -217,25 +217,25 @@ include_graphics("figures/base-out-inferno.png")
 counties <- ussf::boundaries(geography = "county")
 
 out <- base_layer + 
-      scale_fill_continuous_sequential(palette = "Grays") + 
+      scale_fill_continuous_sequential(palette = "Inferno") + 
   geom_sf(data = counties, 
           fill = NA,
           size = 0.05,
           inherit.aes = FALSE,
-          color = "firebrick", 
+          color = "white", 
           alpha = 0.3) + 
   coord_sf() + 
   guides(fill = FALSE) + 
   theme_void()
 
 
-ggsave(file = "figures/base-and-county.png", 
+ggsave(file = "figures/base-and-county-inferno.png", 
        plot = out, width = 12, height=7, units="in")
 
 ```
 
 ```{r plot-base-and-boundary}
-include_graphics("figures/base-and-county.png")
+include_graphics("figures/base-and-county-inferno.png")
 ```
 
 # Save the base layer object
