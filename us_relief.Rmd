@@ -19,11 +19,24 @@ output:
   html_document: radix::radix_article
 ---
 
-```{r setup, include=FALSE}
+```{r setup, include=FALSE, echo = FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-```{r libraries, echo = FALSE}
+# The Overall Idea
+
+- Start with a county-, state-, or other map of the United States. 
+- Get raster files of terrain relief data from satellite imagery.
+- _Crop_ the raster files to the US map area.
+- _Mask_ the raster with the borders of the US.
+- Generate a "hillside-shaded relief" representation of the cropped and masked area.
+- Plot it.
+
+The tips on how to generate a good-looking relief shading come from this [very good tutorial](https://stanford.edu/~vbauer/teaching/hillshade.html) by Vincent Bauer.
+
+
+
+```{r libraries, echo = FALSE, include = FALSE}
 
 library(tidyverse)
 library(colorspace)
@@ -57,17 +70,6 @@ library(sf)
 
 ```
 
-# The Overall Idea
-
-- Start with a county-, state-, or other map of the United States. 
-- Get raster files of terrain relief data from satellite imagery.
-- _Crop_ the raster files to the US map area.
-- _Mask_ the raster with the borders of the US.
-- Generate a "hillside-shaded relief" representation of the cropped and masked area.
-- Plot it.
-
-The tips on how to generate a good-looking relief shading come from this [very good tutorial](https://stanford.edu/~vbauer/teaching/hillshade.html) by Vincent Bauer.
-
 
 # Getting the Map Data
 
@@ -96,7 +98,7 @@ counties <- st_transform(ussf::boundaries(geography = "county"), proj_base)
 
 The tiles are big. Be patient throughout the next few chunks of code. 
 
-```{r stich-mosaic}
+```{r make-mosaic, cache=TRUE}
 
 files <- fs::dir_ls(here("raw/nasa"))
 rasters_list <- map(files, raster::raster)
@@ -112,7 +114,7 @@ mosaic_out <- do.call(raster::mosaic, rasters_list)
 
 One nice thing about the cropping and masking process is that it understands that we've moved Alaska and Hawaii. Neat! Again, this next chunk is going to take a while to run. (On the order of "Go get a cup of coffee" time. Perhaps also make a sandwich.) Cropping restricts our mosaic to the bounding box of the US County map. Masking places the US County map area over the terrain mosaic so that's all we'll see of the terrain data.
 
-```{r crop-and-mask}
+```{r crop-and-mask, cache=TRUE}
 
 cropped_mosaic <- raster::crop(mosaic_out, counties) # be patient
 masked_mosaic <- raster::mask(cropped_mosaic, counties) # be even more patient
@@ -130,7 +132,7 @@ Now we have a relief map of the US, with Alaska and Hawaii included off the Cali
 
 ## Hillshading effects make the relief map look nicer
 
-```{r hillshading}
+```{r hillshading, cache=TRUE}
 slope <- raster::terrain(us_relief * 15, opt = "slope", unit = "radians")
 aspect <- raster::terrain(us_relief * 15, opt = "aspect", unit= "radians")
 hillshade <- raster::hillShade(slope, aspect, angle = 45, direction = 315)
@@ -138,14 +140,10 @@ hillshade <- raster::hillShade(slope, aspect, angle = 45, direction = 315)
 ## Check
 ## plot(hillshade, col = gray.colors(20, start = 0, end = 1))
 
-```
-
 ## Smooth the hillshader some more
 
-```{r hillshade-smoother}
-
 hillshade2 <- raster::aggregate(hillshade , fact = 5 , method = "bilinear" )
-hillshade2 <- raster::focal(hillshade2, w=matrix(1/9, nc=3, nr=3), mean)
+hillshade2 <- raster::focal(hillshade2, w = matrix(1/9, nc = 3, nr = 3), mean)
 
 ## Check
 ## plot(hillshade2, col = gray.colors(20, start = 0, end = 1))
@@ -155,7 +153,7 @@ slope2 <- raster::focal(slope2, w = matrix(1/9, nc = 3, nr = 3), mean)
 
 ##  Check
 plot(hillshade2, col = gray.colors(20, start = 0, end = 1))
-plot(slope2, col = grey.colors(100, start=1, end=0), legend = F, alpha = .2, add = TRUE)
+plot(slope2, col = grey.colors(100, start = 1, end = 0), legend = F, alpha = .2, add = TRUE)
 
 ```
 
@@ -193,7 +191,7 @@ ggsave(file = "figures/base_out_inferno.png",
 
 ```
 
-```{r plot-base-layer, fig.fullwidth = TRUE}
+```{r plot-base-layer}
 include_graphics("figures/base_out_inferno.png")
 ```
 
@@ -216,7 +214,7 @@ ggsave(file = "figures/base_and_county.png", plot = out, width = 10, height=6, u
 
 ```
 
-```{r plot-base-and-boundary, fig.fullwidth = TRUE}
+```{r plot-base-and-boundary}
 include_graphics("figures/base_and_county.png")
 ```
 
