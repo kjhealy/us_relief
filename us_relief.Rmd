@@ -23,7 +23,7 @@ output:
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-```{r libraries}
+```{r libraries, echo = FALSE}
 
 library(tidyverse)
 library(colorspace)
@@ -33,8 +33,9 @@ library(socviz)
 library(ggrepel)
 
 ## --------------------------------------------------------------------
-## Custom font and theme, omit if you don't have the myriad library
-## (https://github.com/kjhealy/myriad) and associated Adobe fonts.
+## Custom font and theme. Omit these lines if you don't have the myriad library
+## (https://github.com/kjhealy/myriad) and associated Adobe fonts. It
+## won't make any difference to the results.
 ## --------------------------------------------------------------------
 library(showtext)
 showtext_auto()
@@ -70,7 +71,7 @@ The tips on how to generate a good-looking relief shading come from this [very g
 
 # Getting the Map Data
 
-For the U.S. map, I'm going to use the county-level map contained in the `ussf` package. (More about that and related packages [here](https://dcl-docs.stanford.edu/)). This map includes the lower 48 states, and also a rescaled and relocated Hawaii and Alaska.
+For the U.S. map, I'm going to use the county-level map contained in the `ussf` package. (More about that and related packages [here](https://dcl-docs.stanford.edu/)). This map includes the lower 48 states, and also a rescaled and relocated Hawaii and Alaska. We're using the County boundaries at a moderate resolution, but this package also includes State data. 
 
 ```{r get-ussf}
 ## remotes::install_github("dcl-docs/ussf")
@@ -82,10 +83,11 @@ There are several sources for terrain relief data. I used the [NASA Shuttle Rada
 
 We temporarily adjust the projection of the county map to make it the same as the raster tiles. 
 
-```{r}
+```{r county-data}
 ## The projection we'll use while cleaning
 proj_base <- CRS("+proj=longlat +datum=WGS84") # default WGS84 projection
 
+## try geography = "state" to get the state map
 counties <- st_transform(ussf::boundaries(geography = "county"), proj_base)
 
 ```
@@ -110,7 +112,7 @@ mosaic_out <- do.call(raster::mosaic, rasters_list)
 
 One nice thing about the cropping and masking process is that it understands that we've moved Alaska and Hawaii. Neat! Again, this next chunk is going to take a while to run. (On the order of "Go get a cup of coffee" time. Perhaps also make a sandwich.) Cropping restricts our mosaic to the bounding box of the US County map. Masking places the US County map area over the terrain mosaic so that's all we'll see of the terrain data.
 
-```{r}
+```{r crop-and-mask}
 
 cropped_mosaic <- raster::crop(mosaic_out, counties) # be patient
 masked_mosaic <- raster::mask(cropped_mosaic, counties) # be even more patient
@@ -119,14 +121,11 @@ masked_mosaic <- raster::mask(cropped_mosaic, counties) # be even more patient
 ea_proj <- st_crs(ussf::boundaries(geography = "county"))$proj4string
 us_relief <- raster::projectRaster(masked_mosaic, crs = ea_proj) # be patient again
 
+plot(us_relief)
 ```
 
 
 Now we have a relief map of the US, with Alaska and Hawaii included off the California coast.
-
-```{r first-cut, fig.fullwidth = TRUE}
-plot(us_relief)
-```
 
 
 ## Hillshading effects make the relief map look nicer
@@ -143,7 +142,7 @@ hillshade <- raster::hillShade(slope, aspect, angle = 45, direction = 315)
 
 ## Smooth the hillshader some more
 
-```{r hillshadesmooth}
+```{r hillshade-smoother}
 
 hillshade2 <- raster::aggregate(hillshade , fact = 5 , method = "bilinear" )
 hillshade2 <- raster::focal(hillshade2, w=matrix(1/9, nc=3, nr=3), mean)
@@ -162,7 +161,7 @@ plot(slope2, col = grey.colors(100, start=1, end=0), legend = F, alpha = .2, add
 
 # Convert to a data frame and use with ggplot
 
-```{r}
+```{r hillshade-df}
 
 hills_df <- raster::rasterToPoints(hillshade2)
 hills_df <-  data.frame(hills_df)
@@ -175,7 +174,7 @@ slope_df$slope <- 1 - slope_df$slope
 
 ```
 
-```{r base-layer}
+```{r create-base-layer}
 
 base_layer <- ggplot(data = hills_df,
                      mapping = aes(x = long, y = lat, group = group)) +
@@ -194,12 +193,12 @@ ggsave(file = "figures/base_out_inferno.png",
 
 ```
 
-```{r, fig.fullwidth = TRUE}
+```{r plot-base-layer, fig.fullwidth = TRUE}
 include_graphics("figures/base_out_inferno.png")
 ```
 
 
-```{r base-and-boundary}
+```{r create-base-and-boundary}
 counties <- ussf::boundaries(geography = "county")
 
 out <- base_layer + 
@@ -217,7 +216,7 @@ ggsave(file = "figures/base_and_county.png", plot = out, width = 10, height=6, u
 
 ```
 
-```{r, fig.fullwidth = TRUE}
+```{r plot-base-and-boundary, fig.fullwidth = TRUE}
 include_graphics("figures/base_and_county.png")
 ```
 
