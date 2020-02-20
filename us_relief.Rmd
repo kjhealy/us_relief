@@ -5,18 +5,7 @@ author:
   affiliation: Duke University
   email: kjhealy@soc.duke.edu
 date: '`r format(Sys.Date(), "%B %d, %Y")`'
-crossrefYaml: "config/pandoc-crossref-settings.yaml"
-output:
-  pdf_document: 
-    md_extensions: +simple_tables+table_captions+yaml_metadata_block+smart
-    template: /Users/kjhealy/.pandoc/templates/rmd-latex.template
-    pandoc_args: [
-      "--bibliography", "/Users/kjhealy/Documents/bibs/socbib-pandoc.bib",
-      "--filter", "pandoc-crossref",
-      "--filter", "pandoc-citeproc",
-      "--csl", "/Users/kjhealy/.pandoc/csl/ajps.csl"
-      ]      
-  html_document: radix::radix_article
+output: html_document
 ---
 
 ```{r setup, include=FALSE, echo = FALSE}
@@ -186,13 +175,13 @@ base_out <- base_layer +
   guides(fill = FALSE) + 
   theme_void()
 
-ggsave(file = "figures/base_out_inferno.png", 
+ggsave(file = "figures/base-out-inferno.png", 
        plot = base_out, width = 10, height=6, units="in")
 
 ```
 
 ```{r plot-base-layer}
-include_graphics("figures/base_out_inferno.png")
+include_graphics("figures/base-out-inferno.png")
 ```
 
 
@@ -210,12 +199,12 @@ out <- base_layer +
   theme_void()
 
 
-ggsave(file = "figures/base_and_county.png", plot = out, width = 10, height=6, units="in")
+ggsave(file = "figures/base-and-county.png", plot = out, width = 10, height=6, units="in")
 
 ```
 
 ```{r plot-base-and-boundary}
-include_graphics("figures/base_and_county.png")
+include_graphics("figures/base-and-county.png")
 ```
 
 # Save the base layer object
