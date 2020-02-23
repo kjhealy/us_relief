@@ -1,0 +1,228 @@
+---
+title: "A Second Cut at the Relief Map"
+author:
+- name: Kieran Healy
+  affiliation: Duke University
+  email: kjhealy@soc.duke.edu
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+crossrefYaml: "config/pandoc-crossref-settings.yaml"
+output:
+  pdf_document: 
+    md_extensions: +simple_tables+table_captions+yaml_metadata_block+smart
+    template: /Users/kjhealy/.pandoc/templates/rmd-latex.template
+    pandoc_args: [
+      "--bibliography", "/Users/kjhealy/Documents/bibs/socbib-pandoc.bib",
+      "--filter", "pandoc-crossref",
+      "--filter", "pandoc-citeproc",
+      "--csl", "/Users/kjhealy/.pandoc/csl/ajps.csl"
+      ]      
+  html_document: radix::radix_article
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r libraries, echo = FALSE, message = FALSE}
+
+library(tidyverse)
+library(here)
+library(janitor)
+library(socviz)
+library(ggrepel)
+```
+
+```{r kjh-libs, echo = FALSE, message = FALSE}
+## --------------------------------------------------------------------
+## Custom font and theme, omit if you don't have the myriad library
+## (https://github.com/kjhealy/myriad) and associated Adobe fonts.
+## --------------------------------------------------------------------
+library(showtext)
+showtext_auto()
+library(myriad)
+import_myriad_semi()
+
+theme_set(theme_myriad_semi())
+
+### --------------------------------------------------------------------
+
+```
+
+
+```{r geopackages, echo = FALSE, message = FALSE}
+## install.packages("raster")
+## install.packages(spData)
+## install.packages(elevatr)
+library(rgdal)
+library(maptools)
+library(sf)
+library(elevatr)
+```
+
+```{r utility-functions, echo = FALSE, message = FALSE}
+
+## Convenient "Not In" operator (the inverse of %in%)
+"%nin%" <- function(x, y) {
+  return( !(x %in% y) )
+}
+
+```
+
+
+## Introduction
+Here's a simpler and faster way to generate a hillshaded relief map, this time for "CONUS" (the continental United States) only, i.e. excluding Alaska, Hawaii, and various territories. We also sort out the problem of being able to plot points on top of the base layer. There are some finicky aspects to `geom_sf()` plotting points properly. What matters is setting up the objects carefully. 
+
+### Projections
+
+We'll start with two projections: `proj_base` is the "unprojected" starting point, using latitude and longitude only and the traditional WGS84 datum. I found that doing the initial data-munging with this datum specified was important to things not going wrong later when we want to change the projection. 
+
+The second projection is the one we'll end up using, which is in essence EPSG 5071, the Albers equal-area projection for the continental US. We specify it here as a PROJ4 string. 
+
+```{r}
+## CONUS Albers https://epsg.io/5071
+
+proj_base <- CRS("+proj=longlat +datum=WGS84")
+
+ea_proj <- "+proj=aea +lat_1=29.5 +lat_2=45.5 +lat_0=23 +lon_0=-96 +x_0=0 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs"
+
+```
+
+## State geometry and elevation rasters
+
+First we grab a map of the lower 48 from the `spData` package. Then we use the `elevatr` package to get elevation raster data remotely. See the documentation for `elevatr` for details on the source. The `z` argument in `get_elev_raster()` specifies the zoom level. It runs from 1 to 16, with higher numbers meaning higher resolutions---but also more and larger tiles and more processing time. Here I'm using z = 5 to make things quicker. Up to z = 8 is tolerable I think, for the purposes of the kind of map we're making.
+
+```{r get-elev-data}
+states <- spData::us_states
+state_elev <- elevatr::get_elev_raster(states, z = 5)
+```
+
+Next we crop and mask the tiles as before.
+
+```{r crop-and-mask}
+cropped_state <- raster::crop(state_elev, states) 
+masked_state <- raster::mask(cropped_state, states) 
+
+```
+
+Then we transform the projections of both the state outlines and the masked rasters to the equal-area projection. 
+
+```{r transform}
+states <- st_transform(states, ea_proj)
+masked_state <- raster::projectRaster(masked_state, crs = ea_proj) # be patient again
+```
+
+## Do the hillshading
+
+Next we calculate and simplify the hills and slopes.
+
+```{r calculate-hillshades}
+slope <- raster::terrain(masked_state * 15, opt = "slope", unit = "radians")
+aspect <- raster::terrain(masked_state * 15, opt = "aspect", unit= "radians")
+hillshade <- raster::hillShade(slope, aspect, angle = 45, direction = 315)
+
+## Smooth the hillshader some more
+hillshade2 <- raster::aggregate(hillshade, fact = 5 , method = "bilinear" )
+hillshade2 <- raster::focal(hillshade2, w = matrix(1/9, nc = 3, nr = 3), mean)
+slope2 <- raster::aggregate(slope, fact = 5 , method = "bilinear" )
+slope2 <- raster::focal(slope2, w = matrix(1/9, nc = 3, nr = 3), mean)
+
+hills_df <- raster::rasterToPoints(hillshade2)
+hills_df <-  data.frame(hills_df)
+colnames(hills_df) <- c("lon", "lat", "hills")
+
+slope_df <- raster::rasterToPoints(slope2)
+slope_df <-  data.frame(slope_df)
+colnames(slope_df) <- c("lon", "lat", "slope")
+
+hills_sf <- st_as_sf(hills_df, coords = c("lon", "lat"), crs = ea_proj)
+slopes_sf <- st_as_sf(slope_df, coords = c("lon", "lat"), crs = ea_proj)
+```
+
+## Construct the base layer
+
+Our base layer map is a ggplot object with three pieces: a tile of the hills, a tile of the slope shadows, and a thin-line outline of state boundaries. The idea is to use the `base_layer` object as the starting point for subsequent plots.
+
+```{r make-base-layer}
+base_layer <- ggplot() +
+    geom_tile(data = hills_df, 
+              mapping = aes(lon, lat, fill = hills, group = 1), 
+                alpha = .7) +
+     geom_tile(data = slope_df, 
+               mapping = aes(lon, lat, fill = slope, group = 2), 
+                 alpha = .2) + 
+  scale_fill_gradient(low = "gray95", high = "gray5") + 
+  geom_sf(data = states, 
+          fill = NA, color = "white", size = 0.05)
+
+out <- base_layer + theme_void() + guides(fill = FALSE)
+
+ggsave(file = "figures/us-relief-2.png", 
+       plot = out,
+       width = 12, 
+       height = 7, 
+       units = "in", 
+       dpi = 600)
+
+print(out)
+```
+
+## Put the base layer to work
+
+Here's an application. We have a CSV of US city data with latitude and longitude points to ID them. We will convert this CSV to an `sf` object as follows:
+
+- Read it in
+- Use `st_as_sf` specifying which columns in the data contain the coordinate data (in this case, `lon` and `lat`)
+- Specify the _base_ projection to begin with
+- Don't drop the coordinate data columns
+- See the documentation for details on the `agr` argument.
+- After it's read in, we transform the coordinates to our equal area projection with `st_transform()`
+
+```{r read-city-data}
+## Read cities CSV convert to a Simple Features object,
+## Drop cities in Alaska, Hawaii, PR
+cities <- st_as_sf(read_csv("data/us_cities.csv"), 
+                   coords = c("lon", "lat"),
+                   remove = FALSE, 
+                   crs = proj_base,
+                   agr = "identity") %>%
+  filter(state_id %nin% c("HI", "AK", "PR"))
+
+cities <- st_transform(cities, ea_proj) 
+```
+
+Now we pick twenty cities at random and plot their locations.
+
+```{r plot-cities}
+## Pick 20 cities at random
+base_layer +  
+  geom_sf(data = sample_n(cities, 20), 
+          color = "firebrick", size = 0.5) + 
+  guides(fill = FALSE) + 
+  theme_void()
+
+```
+
+Sometimes `geom_sf()` is a little difficult when we plot points with it, especially when controlling their size. As an alternative we can use `geom_point()` instead. The idea is to extract the correctly-projected coordinates from the `sf` object and turn them in to columns of x and y values. We use `st_coordinates()` to do this, and then bind the result to the `cities` data. By default the columns are called `X` and `Y`. Then we plot those (for a different random 20 cities) instead. 
+
+```{r geom-point-alternative}
+
+cities <- cbind(cities, st_coordinates(cities)) 
+
+base_layer +  
+  geom_point(data = sample_n(cities, 20),
+             mapping = aes(x = X, y = Y),
+          color = "firebrick", size = 0.5) + 
+  guides(fill = FALSE) + 
+  theme_void()
+
+```
+
+## Save the base layer for future use
+
+Finally, so as not to have to do the downloading and processing repeatedly, save the base layer for future use. You can load it with `load()`. 
+
+```{r save-base-layer}
+save(base_layer, file = "data/base_layer.rda", compress = "xz")
+```
+
+
