@@ -93,7 +93,7 @@ First we grab a map of the lower 48 from the `spData` package. Then we use the `
 
 ```{r get-elev-data}
 states <- spData::us_states
-state_elev <- elevatr::get_elev_raster(states, z = 5)
+state_elev <- elevatr::get_elev_raster(states, z = 8)
 ```
 
 Next we crop and mask the tiles as before.
@@ -144,10 +144,10 @@ Our base layer map is a ggplot object with three pieces: a tile of the hills, a 
 
 ```{r make-base-layer}
 base_layer <- ggplot() +
-    geom_tile(data = hills_df, 
+    geom_raster(data = hills_df, 
               mapping = aes(lon, lat, fill = hills, group = 1), 
                 alpha = .7) +
-     geom_tile(data = slope_df, 
+     geom_raster(data = slope_df, 
                mapping = aes(lon, lat, fill = slope, group = 2), 
                  alpha = .2) + 
   scale_fill_gradient(low = "gray95", high = "gray5") + 
@@ -165,6 +165,15 @@ ggsave(file = "figures/us-relief-2.png",
 
 print(out)
 ```
+
+```{r}
+ggsave(file = "figures/us-relief-2.pdf", 
+       plot = out,
+       width = 12, 
+       height = 7, 
+       units = "in")
+```
+
 
 ## Put the base layer to work
 
