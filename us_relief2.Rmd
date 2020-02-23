@@ -93,7 +93,7 @@ First we grab a map of the lower 48 from the `spData` package. Then we use the `
 
 ```{r get-elev-data}
 states <- spData::us_states
-state_elev <- elevatr::get_elev_raster(states, z = 8)
+state_elev <- elevatr::get_elev_raster(states, z = 7)
 ```
 
 Next we crop and mask the tiles as before.
@@ -116,8 +116,8 @@ masked_state <- raster::projectRaster(masked_state, crs = ea_proj) # be patient 
 Next we calculate and simplify the hills and slopes.
 
 ```{r calculate-hillshades}
-slope <- raster::terrain(masked_state * 15, opt = "slope", unit = "radians")
-aspect <- raster::terrain(masked_state * 15, opt = "aspect", unit= "radians")
+slope <- raster::terrain(masked_state * 25, opt = "slope", unit = "radians")
+aspect <- raster::terrain(masked_state * 25, opt = "aspect", unit= "radians")
 hillshade <- raster::hillShade(slope, aspect, angle = 45, direction = 315)
 
 ## Smooth the hillshader some more
@@ -133,9 +133,8 @@ colnames(hills_df) <- c("lon", "lat", "hills")
 slope_df <- raster::rasterToPoints(slope2)
 slope_df <-  data.frame(slope_df)
 colnames(slope_df) <- c("lon", "lat", "slope")
+slope_df$slope <- 1 - slope_df$slope
 
-hills_sf <- st_as_sf(hills_df, coords = c("lon", "lat"), crs = ea_proj)
-slopes_sf <- st_as_sf(slope_df, coords = c("lon", "lat"), crs = ea_proj)
 ```
 
 ## Construct the base layer
@@ -146,11 +145,11 @@ Our base layer map is a ggplot object with three pieces: a tile of the hills, a 
 base_layer <- ggplot() +
     geom_raster(data = hills_df, 
               mapping = aes(lon, lat, fill = hills, group = 1), 
-                alpha = .7) +
+                alpha = 1, interpolate = TRUE) +
      geom_raster(data = slope_df, 
                mapping = aes(lon, lat, fill = slope, group = 2), 
-                 alpha = .2) + 
-  scale_fill_gradient(low = "gray95", high = "gray5") + 
+                 alpha = 0, interpolate = TRUE) + 
+  scale_fill_gradientn(colours = grey.colors(100, start = 0, end=.95, gamma = 1.5)) + 
   geom_sf(data = states, 
           fill = NA, color = "white", size = 0.05)
 
