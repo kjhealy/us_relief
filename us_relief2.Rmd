@@ -145,11 +145,11 @@ Our base layer map is a ggplot object with three pieces: a tile of the hills, a 
 base_layer <- ggplot() +
     geom_raster(data = hills_df, 
               mapping = aes(lon, lat, fill = hills, group = 1), 
-                alpha = 1, interpolate = TRUE) +
+                alpha = 0.8, interpolate = TRUE) +
      geom_raster(data = slope_df, 
                mapping = aes(lon, lat, fill = slope, group = 2), 
-                 alpha = 0, interpolate = TRUE) + 
-  scale_fill_gradientn(colours = grey.colors(100, start = 0, end=.95, gamma = 1.5)) + 
+                 alpha = 0.2, interpolate = TRUE) + 
+  scale_fill_gradientn(colours = grey.colors(100, start = 0, end=.99)) + 
   geom_sf(data = states, 
           fill = NA, color = "white", size = 0.05)
 

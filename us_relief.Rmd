@@ -55,6 +55,7 @@ library(tidyverse)
 library(colorspace)
 library(here)
 library(janitor)
+library(paletteer)
 library(socviz)
 library(ggrepel)
 
@@ -104,6 +105,10 @@ proj_base <- CRS("+proj=longlat +datum=WGS84") # default WGS84 projection
 
 ## try geography = "state" to get the state map
 counties <- st_transform(ussf::boundaries(geography = "county"), proj_base)
+
+
+
+
 
 ```
 
@@ -243,4 +248,371 @@ include_graphics("figures/base-and-county-inferno.png")
 ```{r save-base-layer}
 save(base_layer, file = "data/base_layer.Rda")
 ```
+
+```{r}
+
+streams <- sf::st_read("data/hydr48m010g/hydr48m010g.gdb", "Stream")
+streams <- sf::st_zm(streams)
+streams <- sf::st_transform(streams, ea_proj)
+
+waterbod <- sf::st_read("data/hydr48m010g/hydr48m010g.gdb", "Waterbody")
+waterbod <- sf::st_transform(waterbod, ea_proj)
+waterbod <- waterbod %>%
+  filter(Feature %in% c("Lake", "Stream"))
+# , 
+#          Name %nin% c("Lake Superior", "Lake Erie", "Lake Huron", "Lake Michigan", "Lake Ontario"))
+
+great_lakes <- sf::st_read("data/great_lakes/Great_Lakes.shp")
+great_lakes <- sf::st_transform(great_lakes, ea_proj)
+
+basin_code <- stringr::str_pad(c(1:221), pad = "0", width = 2)
+basin_regexp <- stringr::str_c(basin_code, collapse = "|")
+
+streams <- streams %>%
+  mutate(
+    strahler_rc = dplyr::na_if(Strahler, "-999"),
+    strahler_rc = dplyr::na_if(strahler_rc, "-998"),
+    strahler_rc_d = cut_interval(strahler_rc, 7),
+    strahler_font = (strahler_rc / 100),
+    strahler_font = tidyr::replace_na(strahler_font, 0),
+    subbasin = stringr::str_extract(ReachCode, basin_regexp))
+
+streams <- streams %>%
+  mutate(strahler_font = case_when(
+    strahler_font == 0 ~ 0, 
+    # strahler_font == 0.01 ~ 0.02,
+    # strahler_font == 0.02 ~ 0.03,
+    # strahler_font == 0.03 ~ 0.05,
+    # strahler_font == 0.04 ~ 0.075,
+    # strahler_font == 0.05 ~ 0.1,
+    # strahler_font == 0.06 ~ 0.15,
+    # strahler_font == 0.07 ~ 0.15,
+    strahler_font == 0.01 ~ 0.03,
+    strahler_font == 0.02 ~ 0.05,
+    strahler_font == 0.03 ~ 0.08,
+    strahler_font == 0.04 ~ 0.1,
+    strahler_font == 0.05 ~ 0.15,
+    strahler_font == 0.06 ~ 0.2,
+    strahler_font == 0.07 ~ 0.5,
+    TRUE ~ 0
+  ),
+  strahler_alpha = case_when(
+    strahler_font == 0 ~ 0, 
+    strahler_font == 0.02 ~ 0.3,
+    strahler_font == 0.03 ~ 0.3,
+    strahler_font == 0.05 ~ 0.3,
+    strahler_font == 0.075 ~ 0.3,
+    strahler_font == 0.1 ~ 0.3,
+    strahler_font == 0.15 ~ 1,
+    TRUE ~ 0)
+  )
+
+out_bw <- ggplot() + 
+  geom_sf(data = great_lakes, color = "gray90", fill = "gray90", size = 0.01) +
+  geom_sf(data = waterbod, color = "gray90", fill = "gray90", size = 0.01) + 
+  geom_sf(data = streams, 
+          size = streams$strahler_font, 
+          color = "gray98") + 
+  theme_void() + 
+  theme(plot.background = element_rect(fill = "gray10", color = "gray10"))
+
+ggsave(file = "figures/streams-lakes-bw.png", 
+       plot = out_bw, width = 12, height=7, units="in", dpi = 600)
+
+ggsave(file = "figures/streams-lakes-bw.pdf", 
+       plot = out_bw, width = 28, height = 18, units="in")
+
+```
+
+```{r vermont}
+proj_vt <- "+proj=tmerc +lat_0=42.5 +lon_0=-72.5 +k=0.999964286 +x_0=500000 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs" 
+
+vermont_rivers <- streams %>%
+  filter(State == "VT") %>%
+  st_transform(proj_vt)
+
+vermont_water <- waterbod %>%
+  filter(State == "VT")  %>%
+  st_transform(proj_vt)
+
+
+vt_s <- ggplot(vermont_rivers) + 
+  geom_sf(size = vermont_rivers$strahler_font + 0.1, 
+          color = waterbod_pal[1]) 
+
+vt_comb <- vt_s + geom_sf(data = vermont_water, 
+          mapping = aes(color = feature_rc, fill = feature_rc),
+          inherit.aes = FALSE) + 
+  scale_color_manual(values = waterbod_pal) + 
+  scale_fill_manual(values = waterbod_pal) + 
+  guides(fill = FALSE, color = FALSE) + 
+  theme_void() 
+
+ggsave(file = "figures/vermont.pdf", 
+       plot = vt_comb, 
+       width = 8, 
+       height = 12)
+
+```
+
+
+```{r}
+proj_ny <- "+proj=tmerc +lat_0=42.5 +lon_0=-72.5 +k=0.999964286 +x_0=500000 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs" 
+proj_ny <- 2829
+
+
+lk_erie <- sf::st_read("data/great_lakes/Lake_Erie_Shoreline.shp")
+lk_erie <- st_transform(lk_erie, proj_ny)
+
+ny_streams <- sf::st_read("data/hydr48m010g/hydr48m010g.gdb", "Stream")
+ny_streams <- sf::st_zm(streams)
+
+ny_streams <- ny_streams %>%
+  mutate(
+    strahler_rc = dplyr::na_if(Strahler, "-999"),
+    strahler_rc = dplyr::na_if(strahler_rc, "-998"),
+    strahler_rc_d = cut_interval(strahler_rc, 7),
+    strahler_font = (strahler_rc / 100),
+    strahler_font = tidyr::replace_na(strahler_font, 0),
+    subbasin = stringr::str_extract(ReachCode, basin_regexp))
+
+ny_streams <- ny_streams %>%
+  mutate(strahler_font = case_when(
+    strahler_font == 0 ~ 0, 
+    strahler_font == 0.01 ~ 0.03,
+    strahler_font == 0.02 ~ 0.04,
+    strahler_font == 0.03 ~ 0.06,
+    strahler_font == 0.04 ~ 0.085,
+    strahler_font == 0.05 ~ 0.15,
+    strahler_font == 0.06 ~ 0.3,
+    strahler_font == 0.07 ~ 0.3,
+    TRUE ~ 0
+  ),
+  strahler_alpha = case_when(
+    strahler_font == 0 ~ 0, 
+    strahler_font == 0.02 ~ 0.3,
+    strahler_font == 0.03 ~ 0.3,
+    strahler_font == 0.05 ~ 0.3,
+    strahler_font == 0.075 ~ 0.3,
+    strahler_font == 0.1 ~ 0.3,
+    strahler_font == 0.15 ~ 1,
+    TRUE ~ 0)
+  )
+
+
+ny_rivers <- ny_streams %>%
+  filter(State == "NY") %>%
+  st_transform(proj_ny)
+
+ny_water <- waterbod %>%
+  filter(State == "NY", Feature == "Lake")  %>%
+  st_transform(proj_ny)
+
+hudson <- waterbod %>%
+  filter(str_detect(Name, "Hudson River")) %>%
+  st_transform(proj_ny)
+
+champ <- waterbod %>%
+  filter(str_detect(Name, "Lake Champlain")) %>%
+  st_transform(proj_ny)
+
+
+ny_greatlakes <- st_crop(st_transform(great_lakes, proj_ny), st_bbox(ny_rivers))
+
+ny_s <- ggplot(ny_rivers) + 
+  geom_sf(size = ny_rivers$strahler_font + 0.1, color = "gray95") 
+
+ny_comb <- ny_s + 
+  geom_sf(data = ny_greatlakes, 
+          color = "gray95", fill = "#e5e5e5", inherit.aes = FALSE, size = 0.1) + 
+  geom_sf(data = champ, 
+          color = "gray95", fill = "#e5e5e5", inherit.aes = FALSE, size = 0.1) +
+  geom_sf(data = ny_water, 
+          mapping = aes(color = Feature, fill = Feature),
+          size = 0.01,
+          inherit.aes = FALSE) + 
+  scale_fill_manual(values = "#e5e5e5") + 
+  scale_color_manual(values = "gray95") +
+  guides(fill = FALSE, color = FALSE) + 
+  theme_void() +
+  theme(plot.background = element_rect(fill = "gray10", color = "gray10"))
+
+ggsave(file = "figures/ny.pdf", 
+       plot = ny_comb, 
+       width = 24, 
+       height = 20)
+
+```
+
+
+```{r}
+proj_cali <- "+proj=aea +lat_1=34 +lat_2=40.5 +lat_0=0 +lon_0=-120 +x_0=0 +y_0=-4000000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs " 
+proj_cali <- 3311
+
+
+cali_streams <- sf::st_read("data/hydr48m010g/hydr48m010g.gdb", "Stream")
+cali_streams <- sf::st_zm(streams)
+
+cali_streams <- cali_streams %>%
+  mutate(
+    strahler_rc = dplyr::na_if(Strahler, "-999"),
+    strahler_rc = dplyr::na_if(strahler_rc, "-998"),
+    strahler_rc_d = cut_interval(strahler_rc, 7),
+    strahler_font = (strahler_rc / 100),
+    strahler_font = tidyr::replace_na(strahler_font, 0),
+    subbasin = stringr::str_extract(ReachCode, basin_regexp))
+
+cali_streams <- cali_streams %>%
+  mutate(strahler_font = case_when(
+    strahler_font == 0 ~ 0.2, 
+    strahler_font == 0.01 ~ 0.1,
+    strahler_font == 0.02 ~ 0.2,
+    strahler_font == 0.03 ~ 0.3,
+    strahler_font == 0.04 ~ 0.4,
+    strahler_font == 0.05 ~ 0.7,
+    strahler_font == 0.06 ~ 1,
+    strahler_font == 0.07 ~ 1.3,
+    TRUE ~ 0
+  ),
+  strahler_alpha = case_when(
+    strahler_font == 0 ~ 0, 
+    strahler_font == 0.02 ~ 0.3,
+    strahler_font == 0.03 ~ 0.3,
+    strahler_font == 0.05 ~ 0.3,
+    strahler_font == 0.075 ~ 0.3,
+    strahler_font == 0.1 ~ 0.3,
+    strahler_font == 0.15 ~ 1,
+    TRUE ~ 0)
+  )
+
+
+cali_rivers <- cali_streams %>%
+  filter(State == "CA") %>%
+  st_transform(proj_cali)
+
+cali_water <- waterbod %>%
+  filter(State == "CA", Feature == "Lake")  %>%
+  st_transform(proj_cali)
+
+cali_s <- ggplot(cali_rivers) + 
+  geom_sf(size = cali_rivers$strahler_font + 0.1, color = "gray95") 
+
+cali_comb <- cali_s + 
+  geom_sf(data = cali_water, 
+          mapping = aes(color = Feature, fill = Feature),
+          size = 0.01,
+          inherit.aes = FALSE) + 
+  scale_fill_manual(values = "#e5e5e5") + 
+  scale_color_manual(values = "gray95") +
+  guides(fill = FALSE, color = FALSE) + 
+  theme_void() +
+  theme(plot.background = element_rect(fill = "gray10", color = "gray10"))
+
+ggsave(file = "figures/cali.pdf", 
+       plot = cali_comb, 
+       width = 12, 
+       height = 15)
+
+```
+
+
+
+```{r}
+
+## CONUS Albers https://epsg.io/5071
+## +proj=aea +lat_1=29.5 +lat_2=45.5 +lat_0=23 +lon_0=-96 +x_0=0 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs
+ea_proj <- st_crs(ussf::boundaries(geography = "state"))$proj4string
+
+states <- spData::us_states
+#states <- st_transform(states, ea_proj)
+
+state_elev <- elevatr::get_elev_raster(states, z = 8)
+## state_elev <- raster::projectRaster(state_elev, crs = ea_proj) # be patient again
+
+cropped_state <- raster::crop(state_elev, states) 
+masked_state <- raster::mask(cropped_state, states) 
+## plot(masked_state)
+
+states <- st_transform(states, ea_proj)
+masked_state <- raster::projectRaster(masked_state, crs = ea_proj) # be patient again
+
+slope <- raster::terrain(masked_state * 15, opt = "slope", unit = "radians")
+aspect <- raster::terrain(masked_state * 15, opt = "aspect", unit= "radians")
+hillshade <- raster::hillShade(slope, aspect, angle = 45, direction = 315)
+
+## Check
+## plot(hillshade, col = gray.colors(20, start = 0, end = 1))
+
+## Smooth the hillshader some more
+hillshade2 <- raster::aggregate(hillshade, fact = 5 , method = "bilinear" )
+hillshade2 <- raster::focal(hillshade2, w = matrix(1/9, nc = 3, nr = 3), mean)
+slope2 <- raster::aggregate(slope, fact = 5 , method = "bilinear" )
+slope2 <- raster::focal(slope2, w = matrix(1/9, nc = 3, nr = 3), mean)
+
+##  Check
+#plot(hillshade2, col = gray.colors(20, start = 0, end = 1))
+#plot(slope2, col = grey.colors(100, start = 1, end = 0), legend = F, alpha = .2, add = TRUE)
+
+
+hills_df <- raster::rasterToPoints(hillshade2)
+hills_df <-  data.frame(hills_df)
+colnames(hills_df) <- c("lon", "lat", "hills")
+
+slope_df <- raster::rasterToPoints(slope2)
+slope_df <-  data.frame(slope_df)
+colnames(slope_df) <- c("lon", "lat", "slope")
+
+hills_sf <- st_as_sf(hills_df, coords = c("lon", "lat"), crs = ea_proj)
+slopes_sf <- st_as_sf(slope_df, coords = c("lon", "lat"), crs = ea_proj)
+
+#slope_df$slope <- 1 - slope_df$slope
+
+
+base_layer <- ggplot() +
+    geom_tile(data = hills_df, 
+              mapping = aes(lon, lat, fill = hills, group = 1), 
+                alpha = .7) +
+     geom_tile(data = slope_df, 
+               mapping = aes(lon, lat, fill = slope, group = 2), 
+                 alpha = .2) + 
+  scale_fill_gradient(low = "gray95", high = "gray5") + 
+  geom_sf(data = states, fill = NA, color = "white", size = 0.05, 
+          inherit.aes = FALSE)
+
+
+out <- base_layer + theme_void() + guides(fill = FALSE)
+
+ggsave(file = "figures/us-relief-2.png", 
+       plot = out,
+       width = 12, 
+       height = 7, 
+       units = "in", 
+       dpi = 600)
+
+```
+
+```{r}
+
+## Read cities CSV convert to a Simple Features object,
+## Drop cities in Alaska and Hawaii
+cities <- st_as_sf(read_csv("data/us_cities.csv"), 
+                   coords = c("lon", "lat"),
+                   remove = FALSE, 
+                   crs = ea_proj,
+                   agr = "constant") %>%
+  filter(state_id %nin% c("HI", "AK"))
+
+ggplot(cities) + geom_sf(size = 0.2)
+
+## Pick 20 cities at random
+base_layer +  
+  geom_sf(data = sample_n(cities, 20), 
+          size = 0.1,
+          color = "red",
+          inherit.aes = FALSE) +
+  coord_sf(datum = st_crs(ea_proj)) + 
+  theme_void()
+  
+```
+
 

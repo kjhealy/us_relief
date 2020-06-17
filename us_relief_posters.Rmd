@@ -1,0 +1,394 @@
+---
+title: "USA Relief Map"
+author:
+- name: Kieran Healy
+  affiliation: Duke University
+  email: kjhealy@soc.duke.edu
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output: html_document
+---
+
+```{r setup, include=FALSE, echo = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(
+  fig.path='figures',
+  cache.path='cache',
+  dev=c("png","pdf"),
+  fig.width=14,
+  fig.height=7,
+  dpi=300,
+  fig.show='hold',
+  fig.lp="fig:",
+  cache=TRUE,
+  par=TRUE,
+  echo=FALSE,
+  warning = FALSE,
+  results="hide",
+  message=FALSE)
+
+knit_hooks$set(
+  par=function(before, options, envir){
+    if (before && options$fig.show!='none') par(mar=c(4,4,.1,.1),cex.lab=.95,cex.axis=.9,mgp=c(2,.7,0),tcl=-.3)
+}, crop=hook_pdfcrop)
+
+opts_knit$set(kfigr.prefix=TRUE,
+              kfigr.link=FALSE)
+
+```
+
+```{r libraries, echo = FALSE, include = FALSE}
+
+library(tidyverse)
+library(colorspace)
+library(here)
+library(janitor)
+library(paletteer)
+library(socviz)
+library(ggrepel)
+
+## --------------------------------------------------------------------
+## Custom font and theme. Omit these lines if you don't have the myriad library
+## (https://github.com/kjhealy/myriad) and associated Adobe fonts. It
+## won't make any difference to the results.
+## --------------------------------------------------------------------
+library(showtext)
+showtext_auto()
+library(myriad)
+import_myriad_semi()
+
+theme_set(theme_myriad_semi())
+
+### --------------------------------------------------------------------
+
+```
+
+
+```{r geopackages}
+## install.packages("raster")
+library(rgdal)
+library(maptools)
+library(sf)
+
+```
+
+
+```{r county-data}
+## The projection we'll use while cleaning
+proj_base <- CRS("+proj=longlat +datum=WGS84") # default WGS84 projection
+
+ea_proj <- "+proj=aea +lat_1=29.5 +lat_2=45.5 +lat_0=23 +lon_0=-96 +x_0=0 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs"
+
+
+## try geography = "state" to get the state map
+counties <- st_transform(ussf::boundaries(geography = "county"), proj_base)
+
+states <- spData::us_states
+states <- st_transform(states, ea_proj)
+
+## basins
+basin_code <- stringr::str_pad(c(1:221), pad = "0", width = 2)
+basin_regexp <- stringr::str_c(basin_code, collapse = "|")
+
+mmcode <- c("05", "06", "07", "08", "10", "11")
+mmc_regexp <-  stringr::str_c(mmcode, collapse = "|")
+
+```
+
+
+```{r}
+
+streams <- sf::st_read("data/hydr48m010g/hydr48m010g.gdb", "Stream")
+streams <- sf::st_zm(streams)
+streams <- sf::st_transform(streams, ea_proj)
+
+waterbod <- sf::st_read("data/hydr48m010g/hydr48m010g.gdb", "Waterbody")
+waterbod <- sf::st_transform(waterbod, ea_proj)
+waterbod <- waterbod %>%
+  filter(Feature %in% c("Lake", "Stream", "Reservoir"))
+# , 
+#          Name %nin% c("Lake Superior", "Lake Erie", "Lake Huron", "Lake Michigan", "Lake Ontario"))
+
+great_lakes <- sf::st_read("data/great_lakes/Great_Lakes.shp")
+great_lakes <- sf::st_transform(great_lakes, ea_proj)
+
+streams <- streams %>%
+  mutate(
+    strahler_rc = dplyr::na_if(Strahler, "-999"),
+    strahler_rc = dplyr::na_if(strahler_rc, "-998"),
+    strahler_rc_d = cut_interval(strahler_rc, 7),
+    strahler_font = (strahler_rc / 100),
+    strahler_font = tidyr::replace_na(strahler_font, 0),
+    subbasin = stringr::str_extract(ReachCode, basin_regexp))
+
+streams <- streams %>%
+  mutate(strahler_font = case_when(
+    strahler_font == 0 ~ 0, 
+    strahler_font == 0.01 ~ 0.03,
+    strahler_font == 0.02 ~ 0.05,
+    strahler_font == 0.03 ~ 0.08,
+    strahler_font == 0.04 ~ 0.1,
+    strahler_font == 0.05 ~ 0.2,
+    strahler_font == 0.06 ~ 0.4,
+    strahler_font == 0.07 ~ 0.4,
+    TRUE ~ 0
+  ),
+  strahler_alpha = case_when(
+    strahler_font == 0 ~ 0, 
+    strahler_font == 0.02 ~ 0.3,
+    strahler_font == 0.03 ~ 0.3,
+    strahler_font == 0.05 ~ 0.3,
+    strahler_font == 0.075 ~ 0.3,
+    strahler_font == 0.1 ~ 0.3,
+    strahler_font == 0.15 ~ 1,
+    TRUE ~ 0)
+  )
+
+```
+
+```{r eval = FALSE}
+out_bw <- ggplot() + 
+  geom_sf(data = great_lakes, color = "gray95", fill = "gray95", size = 0.01) +
+  geom_sf(data = waterbod, color = "gray95", fill = "gray95", size = 0.01) + 
+  geom_sf(data = streams, 
+          size = streams$strahler_font, 
+          color = "gray98") + 
+  theme_void() + 
+  theme(plot.background = element_rect(fill = "gray10", color = "gray10"))
+
+ggsave(file = "figures/streams-lakes-bw.png", 
+       plot = out_bw, width = 12, height=7, units="in", dpi = 600)
+
+ggsave(file = "figures/streams-lakes-bw.pdf", 
+       plot = out_bw, width = 28, height = 18, units="in")
+
+```
+
+
+
+```{r new-york}
+proj_ny <- "+proj=tmerc +lat_0=42.5 +lon_0=-72.5 +k=0.999964286 +x_0=500000 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs" 
+proj_ny <- 2829
+
+
+lk_erie <- sf::st_read("data/great_lakes/Lake_Erie_Shoreline.shp")
+lk_erie <- st_transform(lk_erie, proj_ny)
+
+ny_streams <- sf::st_read("data/hydr48m010g/hydr48m010g.gdb", "Stream")
+ny_streams <- sf::st_zm(ny_streams)
+
+ny_streams <- ny_streams %>%
+  mutate(
+    strahler_rc = dplyr::na_if(Strahler, "-999"),
+    strahler_rc = dplyr::na_if(strahler_rc, "-998"),
+    strahler_rc_d = cut_interval(strahler_rc, 7),
+    strahler_font = (strahler_rc / 100),
+    strahler_font = tidyr::replace_na(strahler_font, 0),
+    subbasin = stringr::str_extract(ReachCode, basin_regexp))
+
+ny_streams <- ny_streams %>%
+  mutate(strahler_font = case_when(
+    strahler_font == 0 ~ 0, 
+    strahler_font == 0.01 ~ 0.03,
+    strahler_font == 0.02 ~ 0.04,
+    strahler_font == 0.03 ~ 0.06,
+    strahler_font == 0.04 ~ 0.085,
+    strahler_font == 0.05 ~ 0.15,
+    strahler_font == 0.06 ~ 0.3,
+    strahler_font == 0.07 ~ 0.3,
+    TRUE ~ 0
+  ),
+  strahler_alpha = case_when(
+    strahler_font == 0 ~ 0, 
+    strahler_font == 0.02 ~ 0.3,
+    strahler_font == 0.03 ~ 0.3,
+    strahler_font == 0.05 ~ 0.3,
+    strahler_font == 0.075 ~ 0.3,
+    strahler_font == 0.1 ~ 0.3,
+    strahler_font == 0.15 ~ 1,
+    TRUE ~ 0)
+  )
+
+
+ny_rivers <- ny_streams %>%
+  filter(State == "NY") %>%
+  st_transform(proj_ny)
+
+ny_water <- waterbod %>%
+  filter(State == "NY", Feature == "Lake")  %>%
+  st_transform(proj_ny)
+
+hudson <- waterbod %>%
+  filter(str_detect(Name, "Hudson River")) %>%
+  st_transform(proj_ny)
+
+champ <- waterbod %>%
+  filter(str_detect(Name, "Lake Champlain")) %>%
+  st_transform(proj_ny)
+
+
+ny_greatlakes <- st_crop(st_transform(great_lakes, proj_ny), st_bbox(ny_rivers))
+
+ny_s <- ggplot(ny_rivers) + 
+  geom_sf(size = ny_rivers$strahler_font + 0.1, color = "gray95") 
+
+ny_comb <- ny_s + 
+  geom_sf(data = ny_greatlakes, 
+          color = "gray95", fill = "#e5e5e5", inherit.aes = FALSE, size = 0.1) + 
+  geom_sf(data = champ, 
+          color = "gray95", fill = "#e5e5e5", inherit.aes = FALSE, size = 0.1) +
+  geom_sf(data = ny_water, 
+          mapping = aes(color = Feature, fill = Feature),
+          size = 0.01,
+          inherit.aes = FALSE) + 
+  scale_fill_manual(values = "#e5e5e5") + 
+  scale_color_manual(values = "gray95") +
+  guides(fill = FALSE, color = FALSE) + 
+  theme_void() +
+  theme(plot.background = element_rect(fill = "gray10", color = "gray10"))
+
+ggsave(file = "figures/ny.pdf", 
+       plot = ny_comb, 
+       width = 24, 
+       height = 20)
+
+```
+
+
+```{r mass}
+proj_mass <- "+proj=lcc +lat_1=42.68333333333333 +lat_2=41.71666666666667 +lat_0=41 +lon_0=-71.5 +x_0=200000 +y_0=750000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs " 
+proj_mass <- 26986
+
+
+streams %>% 
+  filter(str_detect(State, "MA|-MA|MA-")) %>%
+  count(State)
+
+mass_rivers <- streams %>%
+  filter(str_detect(State, "MA|-MA|MA-")) %>%
+  st_transform(proj_mass) 
+
+mass_water <- waterbod %>%
+  filter(str_detect(State, "MA|-MA|MA-"), Feature %in% c("Lake", "Reservoir"))  %>%
+  st_transform(proj_mass)
+
+mass_s <- ggplot(mass_rivers) + 
+  geom_sf(size = mass_rivers$strahler_font + 0.2, color = "gray95") 
+
+mass_comb <- mass_s + 
+  geom_sf(data = mass_water, 
+          mapping = aes(color = Feature, fill = Feature),
+          size = 0.01,
+          inherit.aes = FALSE) + 
+  scale_fill_manual(values = "#e5e5e5") + 
+  scale_color_manual(values = "gray95") +
+  guides(fill = FALSE, color = FALSE) + 
+  theme_void() +
+  theme(plot.background = element_rect(fill = "gray10", color = "gray10"))
+
+ggsave(file = "figures/mass.pdf", 
+       plot = mass_comb, 
+       width = 12, 
+       height = 8)
+
+```
+
+
+```{r}
+
+mmc_rivers <- streams %>%
+  filter(Region %in% c(5:8, 10, 11)) %>%
+  mutate(plot_font = strahler_font) %>%
+  st_transform(ea_proj) %>%
+  mutate(plot_font = replace(plot_font, Name %in% "Ohio River", 0.2))
+
+mmc_water <- waterbod %>%
+  filter(Region %in% c(5:8, 10, 11), Feature %in% c("Lake", "Reservoir"))  %>%
+  st_transform(ea_proj)
+
+mmc_s <- ggplot(mmc_rivers) + 
+  geom_sf(size = mmc_rivers$plot_font + 0.05, color = "gray95", 
+          alpha = mmc_rivers$strahler_alpha) 
+
+mmc_comb <- mmc_s + 
+  geom_sf(data = mmc_water, 
+          mapping = aes(color = Feature, fill = Feature),
+          size = 0.02,
+          inherit.aes = FALSE) + 
+  scale_fill_manual(values = c("#e5e5e5", "#e5e5e5")) + 
+  scale_color_manual(values = c("gray95", "gray95")) +
+  guides(fill = FALSE, color = FALSE) + 
+  theme_void() +
+  theme(plot.background = element_rect(fill = "gray10", color = "gray10"))
+
+
+ggsave(file = "figures/mmc.pdf", 
+       plot = mmc_comb, 
+       width = 12, 
+       height = 9)
+
+
+mmc_sc <- ggplot(mmc_rivers) + 
+  geom_sf(data = states, color = "gray90", fill = NA, size = 0.025, inherit.aes = FALSE) + 
+  geom_sf(aes(color = factor(Region)),
+          size = mmc_rivers$plot_font + 0.05,
+          alpha = mmc_rivers$strahler_alpha) 
+
+mmc_comb_c <- mmc_sc + 
+  geom_sf(data = mmc_water, 
+          mapping = aes(color = factor(Region), fill = factor(Region)),
+          size = 0.02,
+          inherit.aes = FALSE) + 
+  scale_fill_manual(values = paletteer_d("rcartocolor::Vivid")[c(1:6,8)]) + 
+  scale_color_manual(values = paletteer_d("rcartocolor::Vivid")[c(1:6,8)]) +
+  guides(fill = FALSE, color = FALSE) + 
+  theme_void() +
+  theme(plot.background = element_rect(fill = "gray10", color = "gray10"))
+
+
+ggsave(file = "figures/mmc_color.pdf", 
+       plot = mmc_comb_c, 
+       width = 12, 
+       height = 9)
+
+
+
+```
+
+
+```{r}
+
+mmc_rivers <- streams %>%
+  filter(Region %nin% c(5:8, 10, 11)) %>%
+  mutate(plot_font = strahler_font) %>%
+  st_transform(ea_proj) %>%
+  mutate(plot_font = replace(plot_font, Name %in% "Ohio River", 0.2))
+
+mmc_water <- waterbod %>%
+  filter(Region %nin% c(5:8, 10, 11), Feature %in% c("Lake", "Reservoir"))  %>%
+  st_transform(ea_proj)
+
+
+mmc_sc <- ggplot(mmc_rivers) + 
+  geom_sf(data = states, color = "gray90", fill = NA, size = 0.025, inherit.aes = FALSE) + 
+  geom_sf(color = "#e5e5e5",
+          size = mmc_rivers$plot_font + 0.05,
+          alpha = mmc_rivers$strahler_alpha) 
+
+mmc_comb_c <- mmc_sc + 
+  geom_sf(data = mmc_water, 
+          color = "gray90", fill = "gray95",
+          size = 0.02,
+          inherit.aes = FALSE) + 
+  scale_fill_manual(values = c("#e5e5e5", "#e5e5e5")) + 
+  scale_color_manual(values = c("gray95", "gray95")) +
+  guides(fill = FALSE, color = FALSE) + 
+  theme_void() +
+  theme(plot.background = element_rect(fill = "gray10", color = "gray10"))
+
+
+ggsave(file = "figures/mmc_inverse.pdf", 
+       plot = mmc_comb_c, 
+       width = 15, 
+       height = 9)
+```
+

@@ -37,7 +37,7 @@ tex:	clean $(TEX)
 docx:	clean $(DOCX)
 
 %.md: %.Rmd
-	R --slave -e "set.seed(100);knitr::knit('$<')"
+	R --no-echo -e "set.seed(100);knitr::knit('$<')"
 
 %.html:	%.md 
 	$(PANDOC)/pandoc -r $(OPTIONS) -w html  --template=$(PREFIX)/templates/html.template --css=$(PREFIX)/marked/kultiad-serif.css --filter $(PANDOC)/pandoc-crossref --filter $(PANDOC)/pandoc-citeproc --csl=$(PREFIX)/csl/$(CSL).csl --bibliography=$(BIB) -o $@ $<
@@ -47,7 +47,7 @@ docx:	clean $(DOCX)
 
 # PDFs are generated directly from Rmd with render(), and not indirectly vita knit() to md
 %.pdf:	%.Rmd
-	R --slave -e "set.seed(100);rmarkdown::render('$<')"
+	R --no-echo -e "set.seed(100);rmarkdown::render('$<')"
 
 %.docx:	%.md
 	$(PANDOC)/pandoc -r $(OPTIONS) -s --filter $(PANDOC)/pandoc-crossref --filter $(PANDOC)/pandoc-citeproc --csl=$(PREFIX)/csl/$(CSL).csl --bibliography=$(BIB) --reference-doc=$(DOCXTEMPLATE) -o $@ $<
